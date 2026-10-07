@@ -37,7 +37,12 @@ class Flag:
 
 
 def runway_months(cash: float, burn: float) -> float:
-    """Months of cash left at the current burn. Infinite when the company is cash-flow positive."""
+    """Months of cash left at the current burn. Infinite when the company is cash-flow positive.
+
+    NaN when either figure wasn't reported for the month.
+    """
+    if pd.isna(cash) or pd.isna(burn):
+        return math.nan
     if burn <= 0:
         return math.inf
     return max(cash, 0) / burn
@@ -61,9 +66,23 @@ def add_derived(updates: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Figures that stay meaningful when carried forward from an earlier month. Month-over-month
+# changes (growth, burn change) are not carried: they describe one specific month.
+CARRY_FORWARD = ["revenue", "arr", "burn", "cash", "headcount", "customers", "runway_months", "burn_multiple"]
+
+
+def with_last_known(history: pd.DataFrame) -> pd.DataFrame:
+    """Fill gaps left by partial update requests with the company's most recent known figure."""
+    history = history.sort_values("month").copy()
+    cols = [c for c in CARRY_FORWARD if c in history.columns]
+    history[cols] = history[cols].ffill()
+    return history
+
+
 def latest_snapshot(derived: pd.DataFrame) -> pd.DataFrame:
-    """One row per company: its most recent month of data."""
-    return derived.sort_values("month").groupby("company", sort=False).tail(1).set_index("company").sort_index()
+    """One row per company: its most recent month, with any figure missing that month taken from the last month that had it."""
+    rows = [with_last_known(hist).iloc[-1] for _, hist in derived.groupby("company")]
+    return pd.DataFrame(rows).set_index("company").sort_index()
 
 
 def _months_between(earlier: pd.Timestamp, later: date) -> int:
@@ -72,7 +91,7 @@ def _months_between(earlier: pd.Timestamp, later: date) -> int:
 
 def company_flags(history: pd.DataFrame, today: date, t: Thresholds = DEFAULT_THRESHOLDS) -> list[Flag]:
     """Warning signs for one company, given its derived month-by-month history."""
-    history = history.sort_values("month")
+    history = with_last_known(history)
     latest = history.iloc[-1]
     name = latest["company"]
     flags: list[Flag] = []

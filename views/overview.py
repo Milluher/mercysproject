@@ -89,8 +89,10 @@ st.dataframe(
 
 # --- Runway chart -------------------------------------------------------------
 st.subheader("Runway by company")
-burning = snapshot[~snapshot["runway_months"].map(math.isinf)].sort_values("runway_months", ascending=False)
-profitable = sorted(set(snapshot.index) - set(burning.index))
+runway_known = snapshot["runway_months"].notna()
+burning = snapshot[runway_known & ~snapshot["runway_months"].map(math.isinf)].sort_values("runway_months", ascending=False)
+profitable = sorted(snapshot.index[runway_known & snapshot["runway_months"].map(math.isinf)])
+unknown = sorted(snapshot.index[~runway_known])
 
 fig = go.Figure(
     go.Bar(
@@ -112,7 +114,13 @@ for months, label in ((t.runway_critical_months, "Critical"), (t.runway_serious_
     )
 ui.style_figure(fig, height=max(240, 44 * len(burning) + 60))
 fig.update_layout(hovermode="closest", margin=dict(t=32))
-fig.update_xaxes(title="Months of cash at current burn", showgrid=True, range=[0, burning["runway_months"].max() * 1.15])
-st.plotly_chart(fig, width="stretch", theme="streamlit")
+x_max = max(burning["runway_months"].max() if not burning.empty else 0, t.runway_serious_months)
+fig.update_xaxes(title="Months of cash at current burn", showgrid=True, range=[0, x_max * 1.15])
+if burning.empty:
+    st.caption("No company is currently burning cash, or none has reported cash and burn yet.")
+else:
+    st.plotly_chart(fig, width="stretch", theme="streamlit")
 if profitable:
     st.caption(f"Not shown, cash-flow positive: {', '.join(profitable)}")
+if unknown:
+    st.caption(f"Not shown, cash or burn never reported: {', '.join(unknown)}")

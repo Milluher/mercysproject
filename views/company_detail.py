@@ -16,7 +16,9 @@ name = st.selectbox("Company", names, index=names.index(st.query_params["company
 st.query_params["company"] = name
 
 history = derived[derived["company"] == name].sort_values("month")
-latest = history.iloc[-1]
+# Figures a partial update request didn't ask for show their last known value.
+known = metrics.with_last_known(history)
+latest = known.iloc[-1]
 info = companies.set_index("name").loc[name]
 flags = metrics.company_flags(history, ui.today())
 worst = max((f.severity for f in flags), key=metrics.SEVERITIES.index, default="good")
@@ -30,22 +32,25 @@ if pd.notna(info["ownership_pct"]) and info["ownership_pct"]:
 st.caption(" · ".join(d for d in details if d) + f" · {ui.STATUS_LABELS[worst]} · last report {latest['month']:%b %Y}")
 
 # --- Latest numbers -----------------------------------------------------------
-prev = history.iloc[-2] if len(history) > 1 else None
+prev = known.iloc[-2] if len(known) > 1 else None
 
 
-def delta(column):
-    return None if prev is None else latest[column] - prev[column]
+def delta(column, fmt):
+    """Change since the previous month, formatted; None (no delta shown) when either month is missing."""
+    if prev is None or pd.isna(latest[column]) or pd.isna(prev[column]):
+        return None
+    return fmt(latest[column] - prev[column])
 
+
+headcount = "–" if pd.isna(latest["headcount"]) else int(latest["headcount"])
+growth = None if pd.isna(latest["revenue_growth"]) else ui.pct(latest["revenue_growth"])
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("MRR", ui.money(latest["revenue"]), ui.pct(latest["revenue_growth"]) if prev is not None else None)
-c2.metric(
-    "Net burn", ui.money(latest["burn"]),
-    ui.money(delta("burn")) if prev is not None else None, delta_color="inverse",
-)
+c1.metric("MRR", ui.money(latest["revenue"]), growth)
+c2.metric("Net burn", ui.money(latest["burn"]), delta("burn", ui.money), delta_color="inverse")
 c3.metric("Cash", ui.money(latest["cash"]))
 c4.metric("Runway", ui.runway(latest["runway_months"]))
-c5.metric("Headcount", int(latest["headcount"]), int(delta("headcount")) if prev is not None else None)
+c5.metric("Headcount", headcount, delta("headcount", lambda d: f"{d:+.0f}"))
 
 for f in flags:
     st.warning(f"{ui.STATUS_LABELS[f.severity]} — {f.metric}: {f.message}")

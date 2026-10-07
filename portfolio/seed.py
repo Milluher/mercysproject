@@ -10,7 +10,10 @@ import random
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
+
 from portfolio import db
+from portfolio.fields import DEFAULT_FIELDS
 
 MONTHS_OF_HISTORY = 15
 
@@ -85,10 +88,29 @@ def build_demo_db(db_path: Path | str = db.DEFAULT_DB_PATH, today: date | None =
                 company_id, month,
                 revenue=round(mrr), burn=round(burn), cash=round(cash), headcount=headcount,
                 customers=max(1, round(mrr / rng.uniform(900, 1100))),
-                submitted_on=_add_months(month, 1).replace(day=rng.randint(3, 12)),
+                submitted_on=min(_add_months(month, 1).replace(day=rng.randint(3, 12)), today),
                 db_path=db_path,
             )
             cash += burn  # cash at the end of the previous month
+
+    add_demo_request(db_path, today, last_month)
+
+
+def add_demo_request(db_path: Path | str, today: date, last_month: date) -> None:
+    """A monthly update request that every company except the stale one has answered."""
+    companies = db.load_companies(db_path)
+    request_id = db.create_request(
+        f"{last_month:%B %Y} monthly update", last_month, list(DEFAULT_FIELDS), list(companies["id"]),
+        due_on=today.replace(day=15), db_path=db_path,
+    )
+    updates = db.load_updates(db_path)
+    answered = updates[updates["month"] == pd.Timestamp(last_month)]
+    with db.connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO request_responses (request_id, company_id, submitted_on) VALUES (?, ?, ?)",
+            [(request_id, int(r.company_id), r.submitted_on.date().isoformat()) for r in answered.itertuples()],
+        )
+
 
 if __name__ == "__main__":
     import sys

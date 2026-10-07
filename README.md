@@ -4,7 +4,8 @@ A simple internal tool for a VC fund to track portfolio companies' monthly KPIs 
 
 - **Overview**: headline numbers (portfolio ARR, companies needing attention, median runway), a ranked list of warning signs, a table of every company, and runway by company.
 - **Company detail**: one company's revenue, burn, cash and headcount trends, the latest numbers, its warning signs and the founders' notes.
-- **Submit update**: a monthly form for founders (or an analyst entering numbers for them). It flags new warning signs as soon as an update is saved.
+- **Update requests** (fund admin): ask companies for specific metrics. Each request has a **title** (which becomes the title of the founders' form), a reporting month, the **metrics to request**, the companies to ask and an optional due date. The page tracks who has responded and gives each company its own form link.
+- **Submit update**: the form founders fill in. Opened from a request link, it shows the request's title and only the requested metrics, all required. Without a link, the team can pick a request or enter a general update with every metric.
 
 ## Quick start
 
@@ -20,6 +21,16 @@ Open http://localhost:8501. On first run the app creates `data/portfolio.db` fil
 - Start with an empty database for real companies: `python -m portfolio.seed --empty`, then add companies on the **Submit update** page
 
 Set `PORTFOLIO_DB=/path/to/file.db` to store the database somewhere else.
+
+## Update requests
+
+1. On **Update requests**, enter a title (e.g. "Q3 board pack"), the reporting month and the metrics you need, then choose the companies.
+2. Send each founder the form link from their row in the request's table. It opens the form for their company, without the fund's other pages in the sidebar.
+3. Founders submit; the request shows who has responded and who is still pending (marked overdue after the due date).
+
+Requests can ask for just some metrics. Answers to several requests for the same month are combined, so a "cash and burn" request and a later "revenue" request add up to one complete month. A company can submit again to correct its figures. Where a month is missing a figure, the dashboard uses the most recent month that has it.
+
+The metrics that can be requested are listed in `portfolio/fields.py`.
 
 ## Metrics
 
@@ -45,8 +56,9 @@ All thresholds are in `Thresholds` in `portfolio/metrics.py`.
 
 ```
 app.py                  Streamlit entry point and navigation
-views/                  The three pages
-portfolio/db.py         SQLite storage
+views/                  The pages
+portfolio/db.py         SQLite storage, including update requests and responses
+portfolio/fields.py     The metrics that can be requested
 portfolio/metrics.py    KPI calculations and warning-sign rules (pure pandas)
 portfolio/seed.py       Demo portfolio generator
 portfolio/ui.py         Shared formatting and chart helpers
@@ -64,6 +76,6 @@ pytest
 
 This is a starting point for internal use. Before sharing the submit form with founders outside the fund, add:
 
-- **Authentication**: right now anyone with the link can see every company and submit for any company. Give each founder a login, or a private link that only covers their own company.
+- **Authentication**: right now anyone who can reach the app can see every company and submit for any company. Hiding the sidebar on founder links is presentation only. Request links contain plain request and company numbers, so they are easy to guess. Give each founder a login, or private links with unguessable tokens that only cover their own company.
 - **Hosting with backups**: SQLite on one machine is fine for a small team; move to a hosted database (e.g. Postgres) when several people need it.
-- **Reminders**: an email nudge to founders who have missed a report.
+- **Reminders**: email founders their request link, and nudge those still pending near the due date.

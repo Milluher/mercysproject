@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import math
 from datetime import date
+from urllib.parse import urlencode, urlsplit
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from portfolio import db, metrics, seed
+from portfolio.fields import METRIC_FIELDS
 
 SERIES_COLOR = "#2a78d6"
 REFERENCE_COLOR = "#898781"
@@ -37,6 +39,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def reload_data() -> None:
     load_data.clear()
+
+
+def md(text: str) -> str:
+    """Escape text for Streamlit markdown, where a pair of $ signs would otherwise render as maths."""
+    return text.replace("$", "\\$")
 
 
 def money(value: float) -> str:
@@ -95,3 +102,61 @@ def line_chart(df: pd.DataFrame, column: str, label: str, y_format: str | None =
         )
     )
     return style_figure(fig, y_format=y_format)
+
+
+def last_month() -> date:
+    return (today().replace(day=1) - date.resolution).replace(day=1)
+
+
+def metric_inputs(field_keys: list[str], key_prefix: str = "") -> dict:
+    """Render one input per requested metric inside a form. Blank inputs come back as None."""
+    values = {}
+    numeric = [k for k in field_keys if METRIC_FIELDS[k].kind != "text"]
+    cols = st.columns(2)
+    for i, key in enumerate(numeric):
+        field = METRIC_FIELDS[key]
+        is_money = field.kind == "money"
+        values[key] = cols[i % 2].number_input(
+            field.label,
+            value=None,
+            min_value=None if field.allow_negative else 0.0 if is_money else 0,
+            step=1_000.0 if is_money else 1,
+            format="%.0f" if is_money else "%d",
+            help=field.help or None,
+            placeholder="Required",
+            key=f"{key_prefix}{key}",
+        )
+    if "notes" in field_keys:
+        notes = st.text_area(
+            METRIC_FIELDS["notes"].label,
+            placeholder="Key wins, risks, and where the fund can help",
+            key=f"{key_prefix}notes",
+        )
+        values["notes"] = notes.strip() or None
+    return values
+
+
+def form_link(request_id: int, company_id: int | None = None) -> str:
+    """Absolute link to the founder form for a request, based on the URL this app is being viewed at."""
+    params = {"request": request_id}
+    if company_id is not None:
+        params["company"] = company_id
+    try:
+        parts = urlsplit(st.context.url)
+        base = f"{parts.scheme}://{parts.netloc}"
+    except Exception:  # not running in a browser session (e.g. tests)
+        base = ""
+    return f"{base}/submit?{urlencode(params)}"
+
+
+def show_new_flags(company: str) -> None:
+    """After a save, tell the person submitting what warning signs their numbers raise."""
+    _, derived = load_data()
+    history = derived[derived["company"] == company]
+    if history.empty:
+        return
+    flags = metrics.company_flags(history, today())
+    if flags:
+        st.markdown("**These figures raise the following warning signs:**")
+        for f in flags:
+            st.warning(f"{STATUS_LABELS[f.severity]} — {f.metric}: {f.message}")
