@@ -94,6 +94,7 @@ def build_demo_db(db_path: Path | str = db.DEFAULT_DB_PATH, today: date | None =
             cash += burn  # cash at the end of the previous month
 
     add_demo_request(db_path, today, last_month)
+    add_demo_board_pack(db_path, today, last_month, rng)
 
 
 def add_demo_request(db_path: Path | str, today: date, last_month: date) -> None:
@@ -109,6 +110,59 @@ def add_demo_request(db_path: Path | str, today: date, last_month: date) -> None
         conn.executemany(
             "INSERT INTO request_responses (request_id, company_id, submitted_on) VALUES (?, ?, ?)",
             [(request_id, int(r.company_id), r.submitted_on.date().isoformat()) for r in answered.itertuples()],
+        )
+
+
+# Answers to the demo board pack's free-text question.
+DEMO_RISKS = {
+    "Lumen Health": "Hospital procurement cycles slipping into next year",
+    "Fernly": "Churn among customers acquired through the spring promotion",
+    "Quanta Ledger": "New banking regulation could delay two enterprise launches",
+    "Atlas Robotics": "Supplier lead times for actuators are now 20 weeks",
+    "Verdant Grid": "Grid-connection approvals in two pilot regions",
+}
+
+
+def add_demo_board_pack(db_path: Path | str, today: date, last_month: date, rng: random.Random) -> None:
+    """Custom metrics and a quarterly request using them, answered by five of the eight companies."""
+    margin = db.add_custom_metric(
+        "Gross margin", "percent", "Revenue minus cost of goods sold, as a percentage of revenue", db_path=db_path
+    )
+    nps = db.add_custom_metric("Net promoter score", "integer", "From -100 to 100", db_path=db_path)
+    risk = db.add_custom_metric("Biggest risk next quarter", "text", db_path=db_path)
+
+    companies = db.load_companies(db_path).set_index("name")
+    cash = db.load_updates(db_path).set_index(["company", "month"])["cash"]
+
+    # Six months of gross margin history for the responding companies, so the company page has a trend.
+    latest_margin = {}
+    for name in DEMO_RISKS:
+        level = rng.uniform(45, 78)
+        for i in range(-5, 1):
+            month = _add_months(last_month, i)
+            level += rng.uniform(-1.5, 2.0)
+            db.save_values(
+                int(companies.loc[name, "id"]), month, {f"custom:{margin}": round(level, 1)},
+                submitted_on=min(_add_months(month, 1).replace(day=8), today), db_path=db_path,
+            )
+        latest_margin[name] = round(level, 1)
+
+    request_id = db.create_request(
+        "Q3 board pack", last_month,
+        [f"custom:{margin}", f"custom:{nps}", f"custom:{risk}", "cash"], list(companies["id"]),
+        due_on=today.replace(day=28), db_path=db_path,
+    )
+    for name, risk_text in DEMO_RISKS.items():
+        company_id = int(companies.loc[name, "id"])
+        db.submit_request_response(
+            request_id, company_id,
+            {
+                f"custom:{margin}": latest_margin[name],
+                f"custom:{nps}": rng.randint(20, 65),
+                f"custom:{risk}": risk_text,
+                "cash": cash[(name, pd.Timestamp(last_month))],
+            },
+            submitted_on=today, db_path=db_path,
         )
 
 

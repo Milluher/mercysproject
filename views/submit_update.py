@@ -8,13 +8,13 @@ general update with every metric, for the team entering numbers on a founder's b
 import streamlit as st
 
 from portfolio import db, ui
-from portfolio.fields import DEFAULT_FIELDS
 
 GENERAL = "general"
 
 companies, _ = ui.load_data()
 names_by_id = dict(zip(companies["id"], companies["name"]))
 requests = {r["id"]: r for r in db.load_requests()}
+catalogue = db.field_catalogue()
 
 
 def query_int(name):
@@ -50,7 +50,7 @@ if request_id is None:
         name = st.selectbox("Company", companies["name"])
         month = st.date_input("Reporting month", value=ui.last_month(), max_value=ui.today(),
                               help="Any day in the month works")
-        values = ui.metric_inputs(DEFAULT_FIELDS, key_prefix="general_")
+        values = ui.metric_inputs(list(catalogue.values()), key_prefix="general_", optional=True)
         submitted = st.form_submit_button("Submit update", type="primary")
     st.caption("Blank fields keep whatever was already saved for that month.")
 
@@ -59,7 +59,7 @@ if request_id is None:
             st.error("Fill in at least one metric.")
             st.stop()
         cid = int(companies.set_index("name").loc[name, "id"])
-        db.upsert_update(cid, month, **values)
+        db.save_values(cid, month, values)
         ui.reload_data()
         st.success(f"Saved {name}'s update for {month:%B %Y}.")
         ui.show_new_flags(name)
@@ -92,7 +92,8 @@ if company_id in request["responses"]:
     )
 
 with st.form(f"request_{request_id}"):
-    values = ui.metric_inputs(request["fields"], key_prefix=f"r{request_id}_")
+    fields = [catalogue[k] for k in request["fields"] if k in catalogue]
+    values = ui.metric_inputs(fields, key_prefix=f"r{request_id}_")
     submitted = st.form_submit_button("Submit", type="primary")
 
 if submitted:

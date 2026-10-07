@@ -6,16 +6,50 @@ import pandas as pd
 import streamlit as st
 
 from portfolio import db, ui
-from portfolio.fields import DEFAULT_FIELDS, METRIC_FIELDS
+from portfolio.fields import CUSTOM_KINDS, DEFAULT_FIELDS
 
 companies, _ = ui.load_data()
 names_by_id = dict(zip(companies["id"], companies["name"]))
+catalogue = db.field_catalogue()
 
 st.title("Update requests")
 st.caption(
     "Ask portfolio companies for the metrics you need. The title becomes the title of the form founders fill in, "
     "and they only see the metrics you request."
 )
+
+# --- Custom metrics -------------------------------------------------------------
+custom = db.load_custom_metrics()
+# A fixed label keeps the expander open across reruns (changing it would reset the widget).
+with st.expander("Custom metrics"):
+    st.caption(
+        "Define your own metrics, like gross margin or NPS, to request alongside the built-in ones. "
+        "Answers show up in each request's table below and on the company's detail page."
+    )
+    with st.form("new_custom_metric", clear_on_submit=True):
+        col1, col2 = st.columns([3, 2])
+        name = col1.text_input("Metric name", placeholder="e.g. Gross margin", max_chars=60)
+        kind = col2.selectbox("Type", list(CUSTOM_KINDS), format_func=lambda k: CUSTOM_KINDS[k][0])
+        help_text = st.text_input(
+            "Note for founders (optional)", placeholder="e.g. Revenue minus cost of goods sold, as a % of revenue"
+        )
+        if st.form_submit_button("Add metric"):
+            try:
+                db.add_custom_metric(name, kind, help_text)
+            except ValueError as e:
+                st.error(ui.md(str(e)))
+            else:
+                st.rerun()
+
+    for m in custom.itertuples():
+        row = st.columns([4, 2, 3, 1], vertical_alignment="center")
+        row[0].markdown(f"**{ui.md(catalogue[m.key].label)}**" + (f"  \n{ui.md(m.help)}" if m.help else ""))
+        row[1].caption(CUSTOM_KINDS[m.kind][0])
+        row[2].caption(f"In {m.requests} request{'s' if m.requests != 1 else ''} · {m.answers} answer{'s' if m.answers != 1 else ''}")
+        if not m.requests and not m.answers:
+            if row[3].button("Delete", key=f"delete_metric_{m.id}"):
+                db.delete_custom_metric(m.id)
+                st.rerun()
 
 # --- New request --------------------------------------------------------------
 if companies.empty:
@@ -29,9 +63,10 @@ else:
         due_on = col2.date_input("Due date (optional)", value=None)
         fields = st.multiselect(
             "Metrics to request",
-            options=list(METRIC_FIELDS),
+            options=list(catalogue),
             default=DEFAULT_FIELDS,
-            format_func=lambda k: METRIC_FIELDS[k].label,
+            format_func=lambda k: catalogue[k].label + (" · custom" if catalogue[k].custom_id else ""),
+            help="Add your own metrics under Custom metrics above",
         )
         company_ids = st.multiselect(
             "Companies",
@@ -71,7 +106,8 @@ for r in requests:
                 db.delete_request(r["id"])
                 st.rerun()
 
-        st.markdown("**Metrics:** " + ui.md(" · ".join(METRIC_FIELDS[k].label for k in r["fields"])))
+        fields = [catalogue[k] for k in r["fields"] if k in catalogue]
+        st.markdown("**Metrics:** " + ui.md(" · ".join(f.label for f in fields)))
         st.progress(
             len(responded) / len(asked) if asked else 0.0,
             text=f"{len(responded)} of {len(asked)} companies responded",
@@ -84,10 +120,13 @@ for r in requests:
 
         # Companies still to respond first, then alphabetical.
         ordered = sorted(asked, key=lambda c: (c in r["responses"], names_by_id[c]))
+        answers = db.request_answers(r).reindex(ordered)
         table = pd.DataFrame(
             {
                 "Company": [names_by_id[c] for c in ordered],
                 "Status": [status(c) for c in ordered],
+                # What's on file for the month, so the admin can read the answers here.
+                **{f.label: [ui.format_value(f, v) for v in answers[f.key]] for f in fields},
                 "Form link": [ui.form_link(r["id"], c) for c in ordered],
             }
         )

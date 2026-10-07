@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from portfolio import metrics, ui
+from portfolio import db, metrics, ui
 
 
 companies, derived = ui.load_data()
@@ -67,6 +67,30 @@ with right:
     st.plotly_chart(ui.line_chart(history, "burn", "Net burn"), width="stretch", theme="streamlit")
     st.markdown("**Headcount**")
     st.plotly_chart(ui.line_chart(history, "headcount", "Headcount", y_format=",d"), width="stretch", theme="streamlit")
+
+# --- Custom metrics the fund has requested -------------------------------------
+catalogue = db.field_catalogue()
+custom = db.load_custom_values()
+custom = custom[(custom["company"] == name) & custom["key"].isin(catalogue)]
+if not custom.empty:
+    st.subheader("Custom metrics")
+    numeric = [k for k in custom["key"].unique() if catalogue[k].kind != "text"]
+    cols = st.columns(2)
+    for i, key in enumerate(numeric):
+        field = catalogue[key]
+        series = custom[custom["key"] == key].rename(columns={"value_num": "value"})
+        latest_value = ui.format_value(field, series["value"].iloc[-1])
+        with cols[i % 2]:
+            if len(series) < 2:  # a single month is a number, not a trend
+                st.metric(field.label, latest_value, help=f"Reported for {series['month'].iloc[-1]:%B %Y}")
+                continue
+            st.markdown(f"**{ui.md(field.label)}** · latest {ui.md(latest_value)} ({series['month'].iloc[-1]:%b %Y})")
+            st.plotly_chart(ui.metric_chart(series, field), width="stretch", theme="streamlit", key=f"chart_{key}")
+    for key in (k for k in custom["key"].unique() if catalogue[k].kind == "text"):
+        answers = custom[custom["key"] == key].iloc[::-1]
+        st.markdown(f"**{ui.md(catalogue[key].label)}**")
+        for row in answers.itertuples():
+            st.markdown(f"- **{row.month:%b %Y}** — {ui.md(row.value_text)}")
 
 # --- Founder notes and raw data ----------------------------------------------
 notes = history[history["notes"].fillna("").str.strip() != ""]

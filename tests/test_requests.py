@@ -133,8 +133,11 @@ def test_migrates_database_with_required_metric_columns(tmp_path):
 def test_demo_seed_includes_partly_answered_request(tmp_path):
     path = tmp_path / "demo.db"
     seed.build_demo_db(path, today=date(2026, 10, 7))
-    (request,) = db.load_requests(path)
-    assert request["title"] == "September 2026 monthly update"
+    requests = {r["title"]: r for r in db.load_requests(path)}
+    request = requests["September 2026 monthly update"]
     assert len(request["company_ids"]) == len(seed.DEMO_COMPANIES)
     assert len(request["responses"]) == len(seed.DEMO_COMPANIES) - 1  # the stale company hasn't answered
     assert all(d <= date(2026, 10, 7) for d in request["responses"].values())
+    board_pack = requests["Q3 board pack"]
+    assert sum(k.startswith("custom:") for k in board_pack["fields"]) == 3
+    assert len(board_pack["responses"]) == 5
