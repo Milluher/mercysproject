@@ -70,6 +70,27 @@ CREATE TABLE IF NOT EXISTS custom_values (
     PRIMARY KEY (company_id, month, metric_id)
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name          TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('admin', 'founder')),
+    company_id    INTEGER REFERENCES companies(id) ON DELETE CASCADE,  -- set for founders only
+    password_hash TEXT,                  -- NULL until the person accepts their invite
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_on    TEXT NOT NULL,
+    last_login    TEXT,
+    failed_logins INTEGER NOT NULL DEFAULT 0,
+    locked_until  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+    token_hash   TEXT PRIMARY KEY,       -- SHA-256 of the token; the token itself is never stored
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_on   TEXT NOT NULL,
+    used_on      TEXT
+);
+
 CREATE TABLE IF NOT EXISTS request_responses (
     request_id   INTEGER NOT NULL REFERENCES update_requests(id) ON DELETE CASCADE,
     company_id   INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

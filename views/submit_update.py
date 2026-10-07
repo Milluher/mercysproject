@@ -1,20 +1,25 @@
-"""The form founders fill in.
+"""The form for submitting figures.
 
-Opened from a request link (?request=ID&company=ID), it shows the request's title and only the
-metrics the fund admin asked for. Without a link, it lists open requests and also offers a
-general update with every metric, for the team entering numbers on a founder's behalf.
+Founders see the requests sent to their company and can only ever submit for that company, which
+comes from their account rather than the URL. The fund team can submit for any company, either
+answering a request or entering a general update with every metric.
+
+A request link (?request=ID) opens that request directly, after signing in if needed.
 """
 
 import streamlit as st
 
-from portfolio import db, ui
+from portfolio import db, session, ui
 
 GENERAL = "general"
 
+user = session.current_user()
 companies, _ = ui.load_data()
 names_by_id = dict(zip(companies["id"], companies["name"]))
-requests = {r["id"]: r for r in db.load_requests()}
 catalogue = db.field_catalogue()
+requests = {r["id"]: r for r in db.load_requests()}
+if not user.is_admin:
+    requests = {i: r for i, r in requests.items() if user.company_id in r["company_ids"]}
 
 
 def query_int(name):
@@ -24,30 +29,52 @@ def query_int(name):
         return None
 
 
-request_id = query_int("request")
-company_id = query_int("company")
-linked = request_id in requests  # opened from a link the admin shared
+linked_id = query_int("request")
+request_id = linked_id if linked_id in requests else None
+if linked_id is not None and request_id is None:
+    st.warning("That request link isn't for your company or no longer exists." if not user.is_admin
+               else "That update request no longer exists.")
+
+linked = request_id is not None  # opened from a request link: the request's title is the page title
 
 if not linked:
-    if request_id is not None:
-        st.warning("That update request no longer exists. Pick another one below.")
-    st.title("Submit an update")
-    if companies.empty:
+    if user.is_admin:
+        st.title("Submit an update")
+    else:
+        st.title(names_by_id[user.company_id])
+        st.caption("Updates the fund has asked you for")
+
+if request_id is None:
+    if user.is_admin:
+        options = list(requests) + [GENERAL]
+    else:
+        # Requests still waiting for this company's answer first.
+        options = sorted(requests, key=lambda i: (user.company_id in requests[i]["responses"], -i)) + [GENERAL]
+    if user.is_admin and companies.empty:
         st.info("No portfolio companies yet. Add one on the **Update requests** page.")
         st.stop()
-    options = list(requests) + [GENERAL]
-    choice = st.selectbox(
-        "Which update are you submitting?",
-        options,
-        format_func=lambda k: "General update (all metrics, any month)" if k == GENERAL
-        else f"{requests[k]['title']} · {requests[k]['month']:%b %Y}",
-    )
-    request_id = None if choice == GENERAL else choice
 
-# --- General update: every metric, any month ---------------------------------
+    def describe(k):
+        if k == GENERAL:
+            return "General update (any metrics, any month)"
+        r = requests[k]
+        done = " ✅ submitted" if not user.is_admin and user.company_id in r["responses"] else ""
+        return f"{r['title']} · {r['month']:%b %Y}{done}"
+
+    if not user.is_admin and len(options) == 1:
+        st.info("The fund hasn't asked you for anything right now. You can still send a general update below.")
+    request_id = st.selectbox("Which update are you submitting?", options, format_func=describe)
+    if request_id == GENERAL:
+        request_id = None
+
+# --- General update: any metrics, any month ----------------------------------
 if request_id is None:
     with st.form("general_update"):
-        name = st.selectbox("Company", companies["name"])
+        if user.is_admin:
+            name = st.selectbox("Company", companies["name"])
+            company_id = int(companies.set_index("name").loc[name, "id"])
+        else:
+            company_id, name = user.company_id, names_by_id[user.company_id]
         month = st.date_input("Reporting month", value=ui.last_month(), max_value=ui.today(),
                               help="Any day in the month works")
         values = ui.metric_inputs(list(catalogue.values()), key_prefix="general_", optional=True)
@@ -58,32 +85,29 @@ if request_id is None:
         if all(v is None for v in values.values()):
             st.error("Fill in at least one metric.")
             st.stop()
-        cid = int(companies.set_index("name").loc[name, "id"])
-        db.save_values(cid, month, values)
+        db.save_values(company_id, month, values)
         ui.reload_data()
         st.success(f"Saved {name}'s update for {month:%B %Y}.")
-        ui.show_new_flags(name)
+        if user.is_admin:
+            ui.show_new_flags(name)
     st.stop()
 
 # --- Update request: the admin's title and only the requested metrics ---------
 request = requests[request_id]
 asked = [c for c in request["company_ids"] if c in names_by_id]
 
-if linked:
-    st.title(ui.md(request["title"]))
-else:
-    st.subheader(ui.md(request["title"]))
+(st.title if linked else st.subheader)(ui.md(request["title"]))
 details = [f"Reporting month: **{request['month']:%B %Y}**"]
+if not user.is_admin:
+    details.insert(0, f"**{names_by_id[user.company_id]}**")
 if request["due_on"]:
     details.append(f"Due **{request['due_on']:%d %B %Y}**")
 st.markdown(" · ".join(details))
 
-if linked and company_id in asked:
-    st.markdown(f"Company: **{names_by_id[company_id]}**")
-else:
-    if linked and company_id is not None:
-        st.warning("This link is for a company that wasn't asked for this update. Choose your company below.")
+if user.is_admin:
     company_id = st.selectbox("Company", asked, format_func=names_by_id.get)
+else:
+    company_id = user.company_id
 
 if company_id in request["responses"]:
     st.info(
@@ -104,5 +128,5 @@ if submitted:
         st.stop()
     ui.reload_data()
     st.success(f"Thanks! {names_by_id[company_id]}'s figures for {request['month']:%B %Y} have been received.")
-    if not linked:
+    if user.is_admin:
         ui.show_new_flags(names_by_id[company_id])

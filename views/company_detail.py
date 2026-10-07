@@ -1,19 +1,31 @@
-"""One company's KPI history, warning signs and founder notes."""
+"""One company's KPI history, warning signs and founder notes.
+
+The fund team can pick any company. Founders only ever see their own company, which comes from
+their account (never from the URL), and don't see the fund's internal warning signs.
+"""
 
 import pandas as pd
 import streamlit as st
 
-from portfolio import db, metrics, ui
+from portfolio import db, metrics, session, ui
 
-
+user = session.current_user()
 companies, derived = ui.load_data()
-if derived.empty:
-    st.info("No KPI updates yet.")
-    st.stop()
 
-names = sorted(derived["company"].unique())
-name = st.selectbox("Company", names, index=names.index(st.query_params["company"]) if st.query_params.get("company") in names else 0)
-st.query_params["company"] = name
+if user.is_admin:
+    if derived.empty:
+        st.info("No KPI updates yet.")
+        st.stop()
+    names = sorted(derived["company"].unique())
+    requested = st.query_params.get("company")
+    name = st.selectbox("Company", names, index=names.index(requested) if requested in names else 0)
+    st.query_params["company"] = name
+else:
+    name = companies.set_index("id").loc[user.company_id, "name"]
+    if name not in set(derived["company"]):
+        st.title(name)
+        st.info("No figures yet. They'll appear here once you've submitted your first update.")
+        st.stop()
 
 history = derived[derived["company"] == name].sort_values("month")
 # Figures a partial update request didn't ask for show their last known value.
@@ -25,11 +37,14 @@ worst = max((f.severity for f in flags), key=metrics.SEVERITIES.index, default="
 
 st.title(name)
 details = [info["sector"], info["stage"]]
-if pd.notna(info["amount_invested"]) and info["amount_invested"]:
-    details.append(f"{ui.money(info['amount_invested'])} invested")
-if pd.notna(info["ownership_pct"]) and info["ownership_pct"]:
-    details.append(f"{info['ownership_pct']:g}% ownership")
-st.caption(" · ".join(d for d in details if d) + f" · {ui.STATUS_LABELS[worst]} · last report {latest['month']:%b %Y}")
+if user.is_admin:  # the fund's position and assessment are internal
+    if pd.notna(info["amount_invested"]) and info["amount_invested"]:
+        details.append(f"{ui.money(info['amount_invested'])} invested")
+    if pd.notna(info["ownership_pct"]) and info["ownership_pct"]:
+        details.append(f"{info['ownership_pct']:g}% ownership")
+    details.append(ui.STATUS_LABELS[worst])
+details.append(f"last report {latest['month']:%b %Y}")
+st.caption(" · ".join(d for d in details if d))
 
 # --- Latest numbers -----------------------------------------------------------
 prev = known.iloc[-2] if len(known) > 1 else None
@@ -52,7 +67,7 @@ c3.metric("Cash", ui.money(latest["cash"]))
 c4.metric("Runway", ui.runway(latest["runway_months"]))
 c5.metric("Headcount", headcount, delta("headcount", lambda d: f"{d:+.0f}"))
 
-for f in flags:
+for f in flags if user.is_admin else []:
     st.warning(f"{ui.STATUS_LABELS[f.severity]} — {f.metric}: {f.message}")
 
 # --- Trends: one measure per chart --------------------------------------------

@@ -24,10 +24,15 @@ STATUS_LABELS = {
 }
 
 
-def ensure_db() -> None:
-    """Create the database on first run, filled with the demo portfolio."""
-    if not db.DEFAULT_DB_PATH.exists():
+@st.cache_resource
+def ensure_db() -> bool:
+    """Once per server process: create the demo database on first run, or bring an existing
+    database's tables up to date (new tables added by later versions of the app)."""
+    if db.DEFAULT_DB_PATH.exists():
+        db.init_db()
+    else:
         seed.build_demo_db()
+    return True
 
 
 @st.cache_data(ttl=60)
@@ -192,17 +197,24 @@ def metric_inputs(fields: list[MetricField], key_prefix: str = "", optional: boo
     return values
 
 
-def form_link(request_id: int, company_id: int | None = None) -> str:
-    """Absolute link to the founder form for a request, based on the URL this app is being viewed at."""
-    params = {"request": request_id}
-    if company_id is not None:
-        params["company"] = company_id
+def app_link(path: str = "", **params) -> str:
+    """Absolute link into this app, based on the URL it is being viewed at."""
     try:
         parts = urlsplit(st.context.url)
         base = f"{parts.scheme}://{parts.netloc}"
     except Exception:  # not running in a browser session (e.g. tests)
         base = ""
-    return f"{base}/submit?{urlencode(params)}"
+    query = f"?{urlencode(params)}" if params else ""
+    return f"{base}/{path}{query}"
+
+
+def form_link(request_id: int) -> str:
+    """Link to a request's form. Each founder signs in and sees it for their own company."""
+    return app_link("submit", request=request_id)
+
+
+def invite_link(token: str) -> str:
+    return app_link(invite=token)
 
 
 def show_new_flags(company: str) -> None:

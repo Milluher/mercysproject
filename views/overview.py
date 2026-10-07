@@ -6,8 +6,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from portfolio import metrics, ui
+from portfolio import metrics, session, ui
 
+session.require_admin()
 
 companies, derived = ui.load_data()
 if derived.empty:

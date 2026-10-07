@@ -5,11 +5,27 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from portfolio import db, ui
+from portfolio import auth, db, session, ui
 from portfolio.fields import CUSTOM_KINDS, DEFAULT_FIELDS
+
+session.require_admin()
 
 companies, _ = ui.load_data()
 names_by_id = dict(zip(companies["id"], companies["name"]))
+
+# Whether each company has a founder who can sign in and answer requests.
+users = auth.load_users()
+founders = users[(users["role"] == "founder") & users["active"]]
+
+
+def founder_access(company_id: int) -> str:
+    people = founders[founders["company_id"] == company_id]
+    if people["has_password"].any():
+        return f"✅ {int(people['has_password'].sum())} can sign in"
+    if not people.empty:
+        return "✉️ Invite not accepted"
+    return "⚠️ No founder account"
+
 catalogue = db.field_catalogue()
 
 st.title("Update requests")
@@ -112,6 +128,8 @@ for r in requests:
             len(responded) / len(asked) if asked else 0.0,
             text=f"{len(responded)} of {len(asked)} companies responded",
         )
+        st.markdown("**Link for founders** (each signs in and sees it for their own company):")
+        st.code(ui.form_link(r["id"]), language=None)
 
         def status(cid):
             if cid in r["responses"]:
@@ -127,7 +145,7 @@ for r in requests:
                 "Status": [status(c) for c in ordered],
                 # What's on file for the month, so the admin can read the answers here.
                 **{f.label: [ui.format_value(f, v) for v in answers[f.key]] for f in fields},
-                "Form link": [ui.form_link(r["id"], c) for c in ordered],
+                "Founder access": [founder_access(c) for c in ordered],
             }
         )
         st.dataframe(
@@ -135,8 +153,8 @@ for r in requests:
             hide_index=True,
             width="stretch",
             column_config={
-                "Form link": st.column_config.LinkColumn(
-                    help="Send each founder their own link: it opens the form with their company already selected",
+                "Founder access": st.column_config.TextColumn(
+                    help="Founders need an account to answer. Add them on the People page.",
                 ),
             },
         )

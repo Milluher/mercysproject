@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from portfolio import db
+from portfolio import auth, db
 from portfolio.fields import DEFAULT_FIELDS
 
 MONTHS_OF_HISTORY = 15
@@ -95,6 +95,7 @@ def build_demo_db(db_path: Path | str = db.DEFAULT_DB_PATH, today: date | None =
 
     add_demo_request(db_path, today, last_month)
     add_demo_board_pack(db_path, today, last_month, rng)
+    add_demo_users(db_path)
 
 
 def add_demo_request(db_path: Path | str, today: date, last_month: date) -> None:
@@ -164,6 +165,32 @@ def add_demo_board_pack(db_path: Path | str, today: date, last_month: date, rng:
             },
             submitted_on=today, db_path=db_path,
         )
+
+
+# Demo sign-ins, printed in the README. Only for the fictional demo database.
+DEMO_ADMIN = ("Demo Admin", "admin@demo.fund", "demo-admin-password")
+DEMO_FOUNDER_PASSWORD = "demo-founder-password"
+DEMO_FOUNDERS = {
+    "Lumen Health": ("Ada Okafor", "ada@lumenhealth.example"),
+    "Cargoline": ("Ravi Menon", "ravi@cargoline.example"),
+    "Fernly": ("Sofia Lindqvist", "sofia@fernly.example"),
+    "Quanta Ledger": ("Tomás Rivera", "tomas@quantaledger.example"),
+    "Atlas Robotics": ("Mei Chen", "mei@atlasrobotics.example"),
+    "Nimbus Learning": ("Kwame Asante", "kwame@nimbuslearning.example"),  # invited, hasn't signed in yet
+    "Verdant Grid": ("Lena Fischer", "lena@verdantgrid.example"),
+    "Pathwise": ("Noor Haddad", "noor@pathwise.example"),
+}
+
+
+def add_demo_users(db_path: Path | str) -> None:
+    name, email, password = DEMO_ADMIN
+    auth.create_user(email, name, "admin", password=password, db_path=db_path)
+    companies = db.load_companies(db_path).set_index("name")["id"]
+    for company, (name, email) in DEMO_FOUNDERS.items():
+        password = None if company == "Nimbus Learning" else DEMO_FOUNDER_PASSWORD
+        user = auth.create_user(email, name, "founder", int(companies[company]), password=password, db_path=db_path)
+        if password is None:
+            auth.create_invite(user.id, db_path)
 
 
 if __name__ == "__main__":
