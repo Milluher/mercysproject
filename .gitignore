@@ -1,8 +1,13 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-venv/
-.env
-# Local database: contains real portfolio data once founders start reporting
-data/
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.env*
+!.env.example
+.vercel
+# Local database used when DATABASE_URL isn't set
+.data/
+# Playwright / test output
+test-results/
+playwright-report/
